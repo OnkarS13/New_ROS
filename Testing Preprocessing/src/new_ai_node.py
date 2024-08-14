@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+
+import rospy
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+from multilane_sorter.msg import inference
+import cv2
+
+class AI_Node:
+    def __init__(self):
+        rospy.init_node('ai_node')
+        self.bridge = CvBridge()
+
+
+        model_path = "//home/agrograde/agrograde_ws/src/multilane_sorter/ai_models/30th_july_2024/four_class_onnx_model.onnx"
+        self.model = Segmentation_model(model_path)
+
+
+        self.image_queue_p1 = []
+        self.image_queue_p2 = []
+        self.image_queue_p3 = []
+
+
+        self.step = 1
+
+
+        rospy.Subscriber('/lane_1/position_p1/image', Image, self.callback_p1)
+        rospy.Subscriber('/lane_1/position_p2/image', Image, self.callback_p2)
+        rospy.Subscriber('/lane_1/position_p3/image', Image, self.callback_p3)
+
+
+        self.inference_pub = rospy.Publisher('/ai_inference', inference, queue_size=10)
+
+    def callback_p1(self, msg):
+        self.image_queue_p1.append(msg)
+        self.process_images()
+
+    def callback_p2(self, msg):
+        self.image_queue_p2.append(msg)
+        self.process_images()
+
+    def callback_p3(self, msg):
+        self.image_queue_p3.append(msg)
+        self.process_images()
+
+    def process_images(self):
+
+        if self.step == 1 and self.image_queue_p1:
+
+            img_p1 = self.image_queue_p1.pop(0)
+            self.process_image(img_p1, 'P1')
+            self.step += 1
+
+        elif self.step == 2 and self.image_queue_p1 and self.image_queue_p2:
+
+            img_p2 = self.image_queue_p2.pop(0)
+            img_p1 = self.image_queue_p1.pop(0)
+            self.process_image(img_p2, 'P2')
+            self.process_image(img_p1, 'P1')
+            self.step += 1
+
+        elif self.step >= 3 and self.image_queue_p1 and self.image_queue_p2 and self.image_queue_p3:
+
+            img_p3 = self.image_queue_p3.pop(0)
+            img_p2 = self.image_queue_p2.pop(0)
+            img_p1 = self.image_queue_p1.pop(0)
+            self.decision(img_p1, img_p2, img_p3)
+            self.update_lists()
+
+    def process_image(self, msg, position):
+
+        cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+
+
+        result, size = self.model.getPrediction_values(cv_image)
+
+
+        if position == 'P1':
+            if self.step == 1 or len(self.p_new) == 0:
+                self.p_new.append(result)
+            else:
+                self.p_new[0] = result
+        elif position == 'P2':
+            if len(self.p_next) == 0:
+                self.p_next.append(result)
+            else:
+                self.p_next[1] = result
+        elif position == 'P3':
+            if len(self.p_current) == 0:
+                self.p_current.append(result)
+            else:
+                self.p_current[2] = result
+
+    def decision(self, img_p1, img_p2, img_p3):
+
+        combined_results = self.model.get2_img(img_p1, img_p2, img_p3)
+        
+
+        self.message(combined_results)
+
+    def message(self, array):
+
+        array = [round(item, 2) for item in array]
+        array[4] = self.p_current[0][-1]  
+        inf_msg = inference()
+        inf_msg.sprout = array[0]
+        inf_msg.peeled = array[1]
+        inf_msg.rotten = array[2]
+        inf_msg.blacksmut = array[3]
+        inf_msg.size = array[4]
+
+        self.inference_pub.publish(inf_msg)
+        rospy.loginfo(f"Published results: {array}")
+
+    def update_lists(self):
+
+        if len(self.p_current) == 3:
+            self.message(self.p_current)
+            self.p_current.clear()
+
+
+        if len(self.p_next) > 0:
+            self.p_current = list(self.p_next)
+            self.p_next.clear()
+
+        if len(self.p_new) > 0:
+            self.p_next = list(self.p_new)
+            self.p_new.clear()
+
+class Segmentation_model():
+    def __init__(self, model_path):
+        self.model_path = model_path
+        self.session = onnxruntime.InferenceSession(self.model_path)
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_names = [output.name for output in the session.get_outputs()]
+
+    def predict(self, image):
+        result = self.session.run(self.output_names, {self.input_name: image})
+        return result
+
+    def getPercentArea(self, full_mask, region_mask):
+        total_area = np.dot(full_mask.flatten(), np.ones_like(full_mask.flatten()))
+        region_area = np.dot(region_mask.flatten(), np.ones_like(region_mask.flatten()))
+        area_percentage = (region_area / total_area) * 100
+        return area_percentage
+
+    def getPrediction_values(self, img_path):
+        h, w = 224, 224
+        
+        im = cv2.resize(img_path, (h, w))
+        I = im.astype(np.float32)
+        I = I.reshape([1, h, w, 3])
+        
+        preds = self.predict(I)
+        
+        sp = np.argmax(preds[0], axis=3).reshape([h, w])
+        pl = np.argmax(preds[1], axis=3).reshape([h, w])
+        ro = np.argmax(preds[2], axis=3).reshape([h, w])
+        bs = np.argmax(preds[3], axis=3).reshape([h, w])
+        bg = np.argmax(preds[4], axis=3).reshape([h, w])
+
+        gray_img = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+        ret, binary = cv2.threshold(gray_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        contours, hierarchy = cv2.findContours(binary, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_NONE)
+        max_area = 0
+        biggest_contour = None
+        
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > max_area:
+                max_area = area
+                biggest_contour = contour
+        
+        ellipse = cv2.fitEllipse(biggest_contour)
+        size = max(ellipse[1]) * 1.47489
+
+        sprout_area = self.getPercentArea(bg, sp)
+        peeled_area = self.getPercentArea(bg, pl)
+        rotten_area = self.getPercentArea(bg, ro)
+        black_smut_area = self.getPercentArea(bg, bs)
+        background_area = self.getPercentArea(bg, bg)
+        total_area = background_area
+
+        final_percentage_features = [
+            (sprout_area * 100) / total_area,
+            (peeled_area * 100) / total_area,
+            (rotten_area * 100) / total_area,
+            (black_smut_area * 100) / total_area,
+            size
+        ]
+
+        return final_percentage_features, size
+
+    def get2_img(self, img_path1, img_path2, img_path3):
+
+        l1, s1 = self.getPrediction_values(img_path1)
+        l2, s2 = self.getPrediction_values(img_path2)
+        l3, s3 = self.getPrediction_values(img_path3)
+        
+        defects = [
+            max(l1[0], l2[0], l3[0]), 
+            max(l1[1], l2[1], l3[1]), 
+            max(l1[2], l2[2], l3[2]), 
+            max(l1[3], l2[3], l3[3]), 
+            max(s1, s2, s3)
+        ]
+        
+        return defects
+
+if __name__ == '__main__':
+    node = AI_Node()
+    rospy.spin()
+
