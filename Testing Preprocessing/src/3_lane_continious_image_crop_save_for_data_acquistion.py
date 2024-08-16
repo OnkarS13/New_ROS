@@ -1,5 +1,7 @@
 import cv2
 import os
+import glob
+import re
 
 ''' CREATING FOLDERS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> '''
 
@@ -158,14 +160,16 @@ def process_image(image_path):
                                     lane + 1, orientation_current[i], onion_current[lane][i])
 
 
-image_paths = [
-    '/Users/user/Documents/ROS_new_potato/Testing Preprocessing/resources/padded_image.jpg',
-    '/Users/user/Documents/ROS_new_potato/Testing Preprocessing/resources/padded_image.jpg',
-    '/Users/user/Documents/ROS_new_potato/Testing Preprocessing/resources/padded_image.jpg',
-    '/Users/user/Documents/ROS_new_potato/Testing Preprocessing/resources/padded_image.jpg',
-]
+# Using glob to get all images and process them
+def numeric_sort(value):
+    numbers = re.findall(r'\d+', value)
+    return int(numbers[-1]) if numbers else 0
 
-for image_path in image_paths:
+image_files = sorted(glob.glob("resources/testing_images/*.jpg"), key=numeric_sort)
+print(image_files)
+
+# Process each image
+for image_path in image_files:
     process_image(image_path)
 
 print("Cropped images saved")
