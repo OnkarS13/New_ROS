@@ -12,12 +12,11 @@ def rotate_image(image, angle):
     rotated_image = cv2.warpAffine(image, rotation_matrix, (width, height))
     return rotated_image
 
-# Function to create the canvas with padding
+# Function to create the canvas without padding
 def create_canvas():
-    # Create a 672x672 image with a green border of 30 pixels
-    canvas = np.zeros((672 + 60, 672 + 60, 3), dtype=np.uint8)
-    canvas[:, :] = (0, 255, 0)  # Green padding
-    return canvas[30:-30, 30:-30]
+    # Create a 672x672 image (no padding)
+    canvas = np.zeros((672, 672, 3), dtype=np.uint8)
+    return canvas
 
 # Function to place the images on the canvas
 def place_images_on_canvas(canvas, images):
