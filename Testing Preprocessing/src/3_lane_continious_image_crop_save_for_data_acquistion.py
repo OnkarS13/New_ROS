@@ -148,7 +148,7 @@ def process_image(image_path):
     # Process each lane
     for lane in range(lanes):
         new_onion_number = onion_count[lane] + 1
-        for i in reversed(range(4)):  # Adjusted to handle 4 orientations
+        for i in reversed(range(4)):  # Adjusted to handle 4 orientations --> i --> 0 = orientation A, 1 = orientation B, 2 = orientation C, 3 = orientation D
             if i == 0:
                 onion_current[lane][i] = new_onion_number
                 onion_count[lane] += 1
