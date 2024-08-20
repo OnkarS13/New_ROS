@@ -5,76 +5,89 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from multilane_sorter.msg import inference
 import cv2
+import numpy as np
+import onnxruntime
 
 class AI_Node:
     def __init__(self):
         rospy.init_node('ai_node')
         self.bridge = CvBridge()
 
-
+        # Initialize the Segmentation model
         model_path = "//home/agrograde/agrograde_ws/src/multilane_sorter/ai_models/30th_july_2024/four_class_onnx_model.onnx"
         self.model = Segmentation_model(model_path)
 
+        # Initialize lists to store images for each position
+        self.image_queue = [[], [], [], []]  # 4 positions for 4 orientations
 
-        self.image_queue_p1 = []
-        self.image_queue_p2 = []
-        self.image_queue_p3 = []
-
-
+        # Step tracker
         self.step = 1
 
+        # Subscriber for cropped image topic
+        rospy.Subscriber('/lane_1/cropped_image', Image, self.image_callback)
 
-        rospy.Subscriber('/lane_1/position_p1/image', Image, self.callback_p1)
-        rospy.Subscriber('/lane_1/position_p2/image', Image, self.callback_p2)
-        rospy.Subscriber('/lane_1/position_p3/image', Image, self.callback_p3)
+        # Publisher for AI inference results
+        self.inference_pub = rospy.Publisher('ai_inference_channel', inference, queue_size=10)
 
+        # Initialize result lists for different positions
+        self.p_new = []
+        self.p_next = []
+        self.p_current = []
+        self.p_final = []
 
-        self.inference_pub = rospy.Publisher('/ai_inference', inference, queue_size=10)
-
-    def callback_p1(self, msg):
-        self.image_queue_p1.append(msg)
-        self.process_images()
-
-    def callback_p2(self, msg):
-        self.image_queue_p2.append(msg)
-        self.process_images()
-
-    def callback_p3(self, msg):
-        self.image_queue_p3.append(msg)
+    def image_callback(self, msg):
+        # Process each incoming image message
+        position = self.step - 1  # Get current position (0 = P1, 1 = P2, 2 = P3, 3 = P4)
+        self.image_queue[position].append(msg)
         self.process_images()
 
     def process_images(self):
-
-        if self.step == 1 and self.image_queue_p1:
-
-            img_p1 = self.image_queue_p1.pop(0)
+        # Process images based on the current step
+        if self.step == 1 and self.image_queue[0]:
+            # Process the first image for P1
+            img_p1 = self.image_queue[0].pop(0)
             self.process_image(img_p1, 'P1')
             self.step += 1
 
-        elif self.step == 2 and self.image_queue_p1 and self.image_queue_p2:
-
-            img_p2 = self.image_queue_p2.pop(0)
-            img_p1 = self.image_queue_p1.pop(0)
+        elif self.step == 2 and self.image_queue[0] and self.image_queue[1]:
+            # Process images for P2 and P1
+            img_p2 = self.image_queue[1].pop(0)
+            img_p1 = self.image_queue[0].pop(0)
             self.process_image(img_p2, 'P2')
             self.process_image(img_p1, 'P1')
             self.step += 1
 
-        elif self.step >= 3 and self.image_queue_p1 and self.image_queue_p2 and self.image_queue_p3:
+        elif self.step == 3 and self.image_queue[0] and self.image_queue[1] and self.image_queue[2]:
+            # Process images for P3, P2, P1
+            img_p3 = self.image_queue[2].pop(0)
+            img_p2 = self.image_queue[1].pop(0)
+            img_p1 = self.image_queue[0].pop(0)
+            self.process_image(img_p3, 'P3')
+            self.process_image(img_p2, 'P2')
+            self.process_image(img_p1, 'P1')
+            self.step += 1
 
-            img_p3 = self.image_queue_p3.pop(0)
-            img_p2 = self.image_queue_p2.pop(0)
-            img_p1 = self.image_queue_p1.pop(0)
-            self.decision(img_p1, img_p2, img_p3)
+        elif self.step == 4 and self.image_queue[0] and self.image_queue[1] and self.image_queue[2] and self.image_queue[3]:
+            # Process images for P4, P3, P2, P1
+            img_p4 = self.image_queue[3].pop(0)
+            img_p3 = self.image_queue[2].pop(0)
+            img_p2 = self.image_queue[1].pop(0)
+            img_p1 = self.image_queue[0].pop(0)
+            self.process_image(img_p4, 'P4')
+            self.process_image(img_p3, 'P3')
+            self.process_image(img_p2, 'P2')
+            self.process_image(img_p1, 'P1')
+            
             self.update_lists()
 
     def process_image(self, msg, position):
 
         cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
 
-
+        # Run the actual inference model on the image
         result, size = self.model.getPrediction_values(cv_image)
 
-
+        # Update lists based on the position
         if position == 'P1':
             if self.step == 1 or len(self.p_new) == 0:
                 self.p_new.append(result)
@@ -90,18 +103,15 @@ class AI_Node:
                 self.p_current.append(result)
             else:
                 self.p_current[2] = result
-
-    def decision(self, img_p1, img_p2, img_p3):
-
-        combined_results = self.model.get2_img(img_p1, img_p2, img_p3)
-        
-
-        self.message(combined_results)
+        elif position == 'P4':
+            if len(self.p_final) == 0:
+                self.p_final.append(result)
+            else:
+                self.p_final[3] = result
 
     def message(self, array):
 
         array = [round(item, 2) for item in array]
-        array[4] = self.p_current[0][-1]  
         inf_msg = inference()
         inf_msg.sprout = array[0]
         inf_msg.peeled = array[1]
@@ -114,10 +124,13 @@ class AI_Node:
 
     def update_lists(self):
 
-        if len(self.p_current) == 3:
-            self.message(self.p_current)
-            self.p_current.clear()
+        if len(self.p_final) == 4:
+            self.message(self.p_final)
+            self.p_final.clear()
 
+        if len(self.p_current) > 0:
+            self.p_final = list(self.p_current)
+            self.p_current.clear()
 
         if len(self.p_next) > 0:
             self.p_current = list(self.p_next)
@@ -132,7 +145,7 @@ class Segmentation_model():
         self.model_path = model_path
         self.session = onnxruntime.InferenceSession(self.model_path)
         self.input_name = self.session.get_inputs()[0].name
-        self.output_names = [output.name for output in the session.get_outputs()]
+        self.output_names = [output.name for output in self.session.get_outputs()]
 
     def predict(self, image):
         result = self.session.run(self.output_names, {self.input_name: image})
@@ -191,23 +204,6 @@ class Segmentation_model():
 
         return final_percentage_features, size
 
-    def get2_img(self, img_path1, img_path2, img_path3):
-
-        l1, s1 = self.getPrediction_values(img_path1)
-        l2, s2 = self.getPrediction_values(img_path2)
-        l3, s3 = self.getPrediction_values(img_path3)
-        
-        defects = [
-            max(l1[0], l2[0], l3[0]), 
-            max(l1[1], l2[1], l3[1]), 
-            max(l1[2], l2[2], l3[2]), 
-            max(l1[3], l2[3], l3[3]), 
-            max(s1, s2, s3)
-        ]
-        
-        return defects
-
 if __name__ == '__main__':
     node = AI_Node()
     rospy.spin()
-

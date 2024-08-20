@@ -4,7 +4,6 @@ import glob
 import rospy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
-
 from skimage import io
 
 class ImageLoad(object):

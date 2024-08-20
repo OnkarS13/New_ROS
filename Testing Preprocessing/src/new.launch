@@ -17,20 +17,21 @@
     <group if="$(arg lane_1)" ns="lane_1">
         <!-- Offline Mode: Image Folder Publisher for Lane 1 -->
         <node if="$(arg offline)" pkg="multilane_sorter" type="imageFolderPub.py" name="image_pub" output="screen">
-            <param name="~folder_a" value="/home/agrograde/agrograde_ws/src/multilane_sorter/assets/images/lane_1/A"/>
-            <param name="~folder_b" value="/home/agrograde/agrograde_ws/src/multilane_sorter/assets/images/lane_1/B"/>
-            <param name="~folder_c" value="/home/agrograde/agrograde_ws/src/multilane_sorter/assets/images/lane_1/C"/>
+        </node>
+
+        <node pkg="multilane_sorter" type="preprocessing_node.py" name="preprocessing" output="screen">    
         </node>
 
         <!-- AI Node for Lane 1 -->
         <node pkg="multilane_sorter" type="aiNode_onion.py" name="segmentation_node" output="screen">
-            <param name="~camera_id_1" value="camera_11"/>
+            <!-- <param name="~camera_id_1" value="camera_11"/>
             <param name="~camera_id_2" value="camera_12"/>
-            <param name="~training_mode" value="$(arg training_mode)"/>
+            <param name="~training_mode" value="$(arg training_mode)"/> -->
         </node>
 
         <!-- Decision Node for Lane 1 -->
-        <node pkg="multilane_sorter" type="decisionNode.py" name="decision_inference" output="screen"/>
+        <node pkg="multilane_sorter" type="decisionNode.py" name="decision_inference" output="screen">    
+        </node>
 
         <!-- Signaling Node for Lane 1 -->
         <node name="signaling_node" pkg="multilane_sorter" type="signals.py" output="screen">
